@@ -9,6 +9,8 @@
 #include "tensor.h"
 #include "ada_delta.h"
 #include "grad_check.h"
+#include <omp.h>
+#include <stdio.h>
 
 /**
    @brief configuration data for Linear
@@ -86,6 +88,7 @@ struct Linear {
   }
 
 
+
   /**
      @brief the baseline (serial) implementation of update
 
@@ -142,6 +145,12 @@ struct Linear {
   void update_cpu_base() {
     update_base();
   }
+  __device__ __host__
+  void update_cpu_omp() {
+    // ANAN
+    opt_w.update(w, gw);
+    opt_b.update(b, gb);
+  }
   /**
      @brief update weights of all sublayers with gradients
      that must have been computed
@@ -158,6 +167,8 @@ struct Linear {
     tsc_t t0 = get_tsc();
     switch (opt.algo) {
       /* add case for your implementations here */
+    case algo_cpu_omp: 
+      update_cpu_omp(); break;
     case algo_cpu_base:
       update_cpu_base(); break;
     case algo_cuda_base:
@@ -195,6 +206,27 @@ struct Linear {
     const idx_t m = x.n0;
     y.set_n0(m);
     x_ptr = &x;
+    for (idx_t i = 0; i < m; i++) {
+      for (idx_t j = 0; j < N; j++) {
+        real v = 0.0;
+        for (idx_t k0 = 0; k0 < K0; k0++) {
+          for (idx_t k1 = 0; k1 < K1; k1++) {
+            for (idx_t k2 = 0; k2 < K2; k2++) {
+              v += x(i,k0,k1,k2) * w(k0,k1,k2,j);
+            }
+          }
+        }
+        y(i,j) = v + b(j);
+      }
+    }
+  }
+  void forward_cpu_omp(tensor<real,M,K0,K1,K2>& x, int training) {
+    (void)training;
+    const idx_t m = x.n0;
+    y.set_n0(m);
+    x_ptr = &x;
+    // printf("m=%d N=%d K0=%d K1=%d K2=%d\n", m, N, K0, K1, K2);
+#pragma omp parallel for collapse(2)
     for (idx_t i = 0; i < m; i++) {
       for (idx_t j = 0; j < N; j++) {
         real v = 0.0;
@@ -253,6 +285,8 @@ struct Linear {
   void forward_cpu_base(tensor<real,M,K0,K1,K2>& x, int training) {
     forward_base(x, training);
   }
+  
+  
   /**
      @brief forward phase of the layer
      @param (x) input images
@@ -270,6 +304,8 @@ struct Linear {
     tsc_t t0 = get_tsc();
     switch (opt.algo) {
       /* add case for your implementations here */
+    case algo_cpu_omp:
+      forward_cpu_omp(x, training); break;
     case algo_cpu_base:
       forward_cpu_base(x, training); break;
     case algo_cuda_base:
@@ -341,6 +377,51 @@ struct Linear {
       }
     }
   }
+
+  void backward_cpu_omp(tensor<real,M,N>& gy) {
+    const idx_t m = gy.n0;
+    gw.set_n0(K0);
+    gb.set_n0(N);
+    gx.set_n0(m);
+    tensor<real,M,K0,K1,K2>& x = *x_ptr;
+    #pragma omp parallel for collapse(4)
+    for (idx_t k0 = 0; k0 < K0; k0++) {
+      for (idx_t k1 = 0; k1 < K1; k1++) {
+        for (idx_t k2 = 0; k2 < K2; k2++) {
+          for (idx_t j = 0; j < N; j++) {
+            real v = 0.0;
+            for (idx_t i = 0; i < m; i++) {
+              v += gy(i,j) * x(i,k0,k1,k2);
+            }
+            gw(k0,k1,k2,j) = v;
+          }
+        }
+      }
+    }
+    #pragma omp parallel for
+    for (idx_t j = 0; j < N; j++) {
+      real v = 0.0;
+      for (idx_t i = 0; i < m; i++) {
+        v += gy(i, j);
+      }
+      gb(j) = v;
+    }
+    #pragma omp parallel for collapse(4)
+    for (idx_t i = 0; i < m; i++) {
+      for (idx_t k0 = 0; k0 < K0; k0++) {
+        for (idx_t k1 = 0; k1 < K1; k1++) {
+          for (idx_t k2 = 0; k2 < K2; k2++) {
+            real v = 0.0;
+            for (idx_t j = 0; j < N; j++) {
+              v += gy(i,j) * w(k0,k1,k2,j);
+            }
+            gx(i,k0,k1,k2) = v;
+          }
+        }
+      }
+    }
+  }
+
   /**
      @brief the device function of backward called from the 
      global (non-member) function
@@ -381,6 +462,7 @@ struct Linear {
   void backward_cpu_base(tensor<real,M,N>& gy) {
     backward_base(gy);
   }
+  
   /**
      @brief calc the gradient of loss wrt the input (x)
      @param (gy) gradient of loss with respect to the output
@@ -402,6 +484,8 @@ struct Linear {
     tsc_t t0 = get_tsc();
     switch (opt.algo) {
       /* add case for your implementations here */
+    case algo_cpu_omp:
+      backward_cpu_omp(gy); break;
     case algo_cpu_base:
       backward_cpu_base(gy); break;
     case algo_cuda_base:

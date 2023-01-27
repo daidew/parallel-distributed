@@ -8,6 +8,7 @@
 #include "tensor.h"
 #include "ada_delta.h"
 #include "grad_check.h"
+#include <stdio.h>
 
 /**
    @brief configuration data for Convolution2D
@@ -222,6 +223,40 @@ struct Convolution2D {
       }
     }
   }
+  void forward_cpu_omp(tensor<real,maxB,IC,H,W>& x, int training) {
+    (void)training;
+    idx_t B = x.n0;             // batch size
+    y.set_n0(B);
+    x_ptr = &x;                 // save pointer to input for backward
+    // printf("B=%d, OC=%d, H-K+1: %d, W-K+1: %d, IC=%d, K=%d\n", B, OC, H-K+1, W-K+1, IC, K);
+    #pragma omp parallel for collapse(4)
+    for (idx_t s = 0; s < B; s++) {       // for each sample
+      for (idx_t oc = 0; oc < OC; oc++) { // for each output channel
+        for (idx_t i = 0; i < H - K + 1; i++) {   // for each output pixel
+          for (idx_t j = 0; j < W - K + 1; j++) { // for each output pixel
+            // calculate a single output pixel
+            real v = 0.0;
+            for (idx_t ic = 0; ic < IC; ic++) { // input channel
+              for (idx_t di = 0; di < K; di+=2) {
+                for (idx_t dj = 0; dj < K; dj+=4) {
+                  // v += w(oc,ic,di,dj) * x(s,ic,i+di,j+dj);
+                  v += w(oc,ic,di,dj) * x(s,ic,i+di,j+dj) 
+                      +w(oc,ic,di,dj+1) * x(s,ic,i+di,j+dj+1) 
+                      +w(oc,ic,di,dj+2) * x(s,ic,i+di,j+dj+2) 
+                      +w(oc,ic,di,dj+3) * x(s,ic,i+di,j+dj+3) 
+                      +w(oc,ic,di+1,dj) * x(s,ic,i+di+1,j+dj) 
+                      +w(oc,ic,di+1,dj+1) * x(s,ic,i+di+1,j+dj+1) 
+                      +w(oc,ic,di+1,dj+2) * x(s,ic,i+di+1,j+dj+2) 
+                      +w(oc,ic,di+1,dj+3) * x(s,ic,i+di+1,j+dj+3) ;
+                }
+              }
+            }
+            y(s,oc,i,j) = v + b(oc);
+          }
+        }
+      }
+    }
+  }
   /**
      @brief the device function of forward called from the 
      global (non-member) function
@@ -266,6 +301,7 @@ struct Convolution2D {
   void forward_cpu_base(tensor<real,maxB,IC,H,W>& x, int training) {
     forward_base(x, training);
   }
+  
   /**
      @brief forward phase of the layer
      @param (x) input images
@@ -283,6 +319,8 @@ struct Convolution2D {
     tsc_t t0 = get_tsc();
     switch (opt.algo) {
       /* add case for your implementations here */
+    case algo_cpu_omp:
+      forward_cpu_omp(x, training); break;
     case algo_cpu_base:
       forward_cpu_base(x, training); break;
     case algo_cuda_base:
@@ -369,6 +407,86 @@ struct Convolution2D {
       }
     }
   }
+  void backward_cpu_omp(tensor<real,maxB,OC,H-K+1,W-K+1>& gy) {
+    idx_t B = gy.n0;
+    gw.set_n0(OC);
+    gb.set_n0(OC);
+    gx.set_n0(B);
+    tensor<real,maxB,IC,H,W>& x = *x_ptr;
+
+    #pragma omp parallel for collapse(4)
+    for (idx_t oc = 0; oc < OC; oc++) {   // output channel
+      for (idx_t ic = 0; ic < IC; ic++) { // input channel
+        for (idx_t di = 0; di < K; di++) { // kernel pixel
+          for (idx_t dj = 0; dj < K; dj++) { // kernel pixel
+            // real v = 0.0;
+            // for (idx_t s = 0; s < B; s++) { // training samples
+            //   for (idx_t i = 0; i < H - K + 1; i++) { // sample pixel
+            //     for (idx_t j = 0; j < W - K + 1; j++) { // sample pixel
+            //       v += gy(s,oc,i,j) * x(s,ic,i+di,j+dj);
+            //     }
+            //   }
+            // }
+            real v = 0.0;
+            for (idx_t s = 0; s < B; s++) { // training samples
+              for (idx_t i = 0; i < H - K + 1; i+=2) { // sample pixel
+                for (idx_t j = 0; j < W - K + 1; j+=4) { // sample pixel
+                  // v += gy(s,oc,i,j) * x(s,ic,i+di,j+dj);
+                  v += gy(s,oc,i,j) * x(s,ic,i+di,j+dj)
+                      +gy(s,oc,i,j+1) * x(s,ic,i+di,j+1+dj)
+                      +gy(s,oc,i,j+2) * x(s,ic,i+di,j+2+dj)
+                      +gy(s,oc,i,j+3) * x(s,ic,i+di,j+3+dj)
+                      +gy(s,oc,i+1,j) * x(s,ic,i+1+di,j+dj)
+                      +gy(s,oc,i+1,j+1) * x(s,ic,i+1+di,j+1+dj)
+                      +gy(s,oc,i+1,j+2) * x(s,ic,i+1+di,j+2+dj)
+                      +gy(s,oc,i+1,j+3) * x(s,ic,i+1+di,j+3+dj);
+                }
+              }
+            }
+            gw(oc,ic,di,dj) = v;
+
+          }
+        }
+      }
+    }
+    #pragma omp parallel for
+    for (idx_t oc = 0; oc < OC; oc++) {
+      real v = 0.0;
+      for (idx_t s = 0; s < B; s++) {
+        for (idx_t i = 0; i < H - K + 1; i+=2) {
+          for (idx_t j = 0; j < W - K + 1; j+=2) {
+            // v += gy(s,oc,i,j);
+            v += gy(s,oc,i,j) + gy(s,oc,i,j+1) + gy(s,oc,i+1,j) + gy(s,oc,i+1,j+1);
+          }
+        }
+      }
+      gb(oc) = v;
+    }
+    #pragma omp parallel for collapse(4)
+    for (idx_t s = 0; s < B; s++) {
+      for (idx_t ic = 0; ic < IC; ic++) {
+        for (idx_t i = 0; i < H; i++) {
+          for (idx_t j = 0; j < W; j++) {
+            real v = 0.0;
+            for (idx_t oc = 0; oc < OC; oc++) {
+              for (idx_t di = 0; di < K; di++) {
+                for (idx_t dj = 0; dj < K; dj+=3) {
+                  if (0 <= i - di && i - di < H - K + 1
+                      && 0 <= j - dj && j - dj < W - K + 1) {
+                    // v += gy(s,oc,i-di,j-dj) * w(oc,ic,di,dj);
+                    v += gy(s,oc,i-di,j-dj) * w(oc,ic,di,dj)
+                        +gy(s,oc,i-di,j-dj+1) * w(oc,ic,di,dj+1)
+                        +gy(s,oc,i-di,j-dj+2) * w(oc,ic,di,dj+2);
+                  }
+                }
+              }
+            }
+            gx(s,ic,i,j) = v;
+          }
+        }
+      }
+    }
+  }
   /**
      @brief the device function of backward called from the 
      global (non-member) function
@@ -430,6 +548,8 @@ struct Convolution2D {
     tsc_t t0 = get_tsc();
     switch (opt.algo) {
       /* add case for your implementations here */
+    case algo_cpu_omp:
+      backward_cpu_omp(gy); break;
     case algo_cpu_base:
       backward_cpu_base(gy); break;
     case algo_cuda_base:

@@ -82,6 +82,7 @@ typedef enum {
   algo_cpu_base,
   algo_cuda_base,
   /* add your new algorithm here (name it arbitrarily) */
+  algo_cpu_omp,
   /* algo_cpu_simd? */
   /* algo_cpu_omp */
   /* algo_cpu_simd_omp? */
@@ -101,7 +102,11 @@ typedef enum {
 static algo_t parse_algo(const char * s) {
   if (strcmp(s, "cpu_base") == 0) {
     return algo_cpu_base;
-  } else if (strcmp(s, "cuda_base") == 0) {
+  } 
+  else if (strcmp(s, "cpu_omp") == 0) {
+    return algo_cpu_omp;
+  }
+  else if (strcmp(s, "cuda_base") == 0) {
     return algo_cuda_base;
     /* add cases here to handle your algorithms
        } else if (strcmp(s, "cpu_fast") == 0) {
