@@ -241,6 +241,47 @@ struct Linear {
       }
     }
   }
+  void forward_cpu_simd(tensor<real,M,K0,K1,K2>& x, int training) {
+    (void)training;
+    const idx_t m = x.n0;
+    y.set_n0(m);
+    x_ptr = &x;
+    for (idx_t i = 0; i < m; i++) {
+      for (idx_t j = 0; j < N; j++) {
+        real v = 0.0;
+        #pragma omp simd reduction(+:v)
+        for (idx_t k0 = 0; k0 < K0; k0++) {
+          for (idx_t k1 = 0; k1 < K1; k1++) {
+            for (idx_t k2 = 0; k2 < K2; k2++) {
+              v += x(i,k0,k1,k2) * w(k0,k1,k2,j);
+            }
+          }
+        }
+        y(i,j) = v + b(j);
+      }
+    }
+  }
+  void forward_cpu_omp_simd(tensor<real,M,K0,K1,K2>& x, int training) {
+    (void)training;
+    const idx_t m = x.n0;
+    y.set_n0(m);
+    x_ptr = &x;
+    #pragma omp parallel for collapse(2)
+    for (idx_t i = 0; i < m; i++) {
+      for (idx_t j = 0; j < N; j++) {
+        real v = 0.0;
+        #pragma omp simd reduction(+:v)
+        for (idx_t k0 = 0; k0 < K0; k0++) {
+          for (idx_t k1 = 0; k1 < K1; k1++) {
+            for (idx_t k2 = 0; k2 < K2; k2++) {
+              v += x(i,k0,k1,k2) * w(k0,k1,k2,j);
+            }
+          }
+        }
+        y(i,j) = v + b(j);
+      }
+    }
+  }
   /**
      @brief the device function of forward called from the 
      global (non-member) function
@@ -304,6 +345,10 @@ struct Linear {
     tsc_t t0 = get_tsc();
     switch (opt.algo) {
       /* add case for your implementations here */
+    case algo_cpu_omp_simd:
+      forward_cpu_omp_simd(x, training); break;
+    case algo_cpu_simd:
+      forward_cpu_simd(x, training); break;
     case algo_cpu_omp:
       forward_cpu_omp(x, training); break;
     case algo_cpu_base:
@@ -421,7 +466,102 @@ struct Linear {
       }
     }
   }
-
+  void backward_cpu_simd(tensor<real,M,N>& gy) {
+    const idx_t m = gy.n0;
+    gw.set_n0(K0);
+    gb.set_n0(N);
+    gx.set_n0(m);
+    tensor<real,M,K0,K1,K2>& x = *x_ptr;
+    for (idx_t k0 = 0; k0 < K0; k0++) {
+      for (idx_t k1 = 0; k1 < K1; k1++) {
+        for (idx_t k2 = 0; k2 < K2; k2++) {
+          for (idx_t j = 0; j < N; j++) {
+            real v = 0.0;
+            // asm volatile("# ========== (backward_cpu_simd A) loop begins ==========");
+            #pragma omp simd reduction(+:v)
+            for (idx_t i = 0; i < m; i++) {
+              v += gy(i,j) * x(i,k0,k1,k2);
+            }
+            // asm volatile("# ========== (backward_cpu_simd A) loop ends ==========");
+            gw(k0,k1,k2,j) = v;
+          }
+        }
+      }
+    }
+    for (idx_t j = 0; j < N; j++) {
+      real v = 0.0;
+      // asm volatile("# ========== (backward_cpu_simd B) loop begins ==========");
+      #pragma omp simd reduction(+:v)
+      //#pragma clang loop vectorize(enable) vectorize_style(fixed_width)
+      for (idx_t i = 0; i < m; i++) {
+        v += gy(i, j);
+      }
+      // asm volatile("# ========== (backward_cpu_simd B) loop ends ==========");
+      gb(j) = v;
+    }
+    for (idx_t i = 0; i < m; i++) {
+      for (idx_t k0 = 0; k0 < K0; k0++) {
+        for (idx_t k1 = 0; k1 < K1; k1++) {
+          for (idx_t k2 = 0; k2 < K2; k2++) {
+            real v = 0.0;
+            // asm volatile("# ========== (backward_cpu_simd C) loop begins ==========");
+            #pragma omp simd reduction(+:v)
+            for (idx_t j = 0; j < N; j++) {
+              v += gy(i,j) * w(k0,k1,k2,j);
+            }
+            // asm volatile("# ========== (backward_cpu_simd C) loop ends ==========");
+            gx(i,k0,k1,k2) = v;
+          }
+        }
+      }
+    }
+  }
+  void backward_cpu_omp_simd(tensor<real,M,N>& gy) {
+    const idx_t m = gy.n0;
+    gw.set_n0(K0);
+    gb.set_n0(N);
+    gx.set_n0(m);
+    tensor<real,M,K0,K1,K2>& x = *x_ptr;
+    #pragma omp parallel for collapse(4)
+    for (idx_t k0 = 0; k0 < K0; k0++) {
+      for (idx_t k1 = 0; k1 < K1; k1++) {
+        for (idx_t k2 = 0; k2 < K2; k2++) {
+          for (idx_t j = 0; j < N; j++) {
+            real v = 0.0;
+            #pragma omp simd reduction(+:v)
+            for (idx_t i = 0; i < m; i++) {
+              v += gy(i,j) * x(i,k0,k1,k2);
+            }
+            gw(k0,k1,k2,j) = v;
+          }
+        }
+      }
+    }
+    #pragma omp parallel for
+    for (idx_t j = 0; j < N; j++) {
+      real v = 0.0;
+      #pragma omp simd reduction(+:v)
+      for (idx_t i = 0; i < m; i++) {
+        v += gy(i, j);
+      }
+      gb(j) = v;
+    }
+    #pragma omp parallel for collapse(4)
+    for (idx_t i = 0; i < m; i++) {
+      for (idx_t k0 = 0; k0 < K0; k0++) {
+        for (idx_t k1 = 0; k1 < K1; k1++) {
+          for (idx_t k2 = 0; k2 < K2; k2++) {
+            real v = 0.0;
+            #pragma omp simd reduction(+:v)
+            for (idx_t j = 0; j < N; j++) {
+              v += gy(i,j) * w(k0,k1,k2,j);
+            }
+            gx(i,k0,k1,k2) = v;
+          }
+        }
+      }
+    }
+  }
   /**
      @brief the device function of backward called from the 
      global (non-member) function
@@ -484,6 +624,10 @@ struct Linear {
     tsc_t t0 = get_tsc();
     switch (opt.algo) {
       /* add case for your implementations here */
+    case algo_cpu_omp_simd:
+      backward_cpu_omp_simd(gy); break;  
+    case algo_cpu_simd:
+      backward_cpu_simd(gy); break;
     case algo_cpu_omp:
       backward_cpu_omp(gy); break;
     case algo_cpu_base:
