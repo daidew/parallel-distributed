@@ -147,7 +147,6 @@ struct Linear {
   }
   __device__ __host__
   void update_cpu_omp() {
-    // ANAN
     opt_w.update(w, gw);
     opt_b.update(b, gb);
   }

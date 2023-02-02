@@ -113,6 +113,30 @@ struct Dropout {
       }
     }
   }
+  void forward_cpu_omp(tensor<real,N0,N1,N2,N3>& x, int training) {
+    const idx_t n0 = x.n0;
+    y.set_n0(n0);
+    /* zero elements with probability of ratio and
+       scale others by 1/(1-ratio) so that the sum 
+       will stay approximately the same */
+    state_forward = rg.get_state();
+    real p = training ? drop_ratio : 0.0;
+    real scale = 1.0 / (1 - p);
+    #pragma omp parallel for collapse(4)
+    for (idx_t i0 = 0; i0 < n0; i0++) {
+      for (idx_t i1 = 0; i1 < N1; i1++) {
+        for (idx_t i2 = 0; i2 < N2; i2++) {
+          for (idx_t i3 = 0; i3 < N3; i3++) {
+            if (rg.rand01() < p) {
+              y(i0,i1,i2,i3) = 0.0;
+            } else {
+              y(i0,i1,i2,i3) = x(i0,i1,i2,i3) * scale;
+            }
+          }
+        }
+      }
+    }
+  }
   /**
      @brief the device function of forward called from the 
      global (non-member) function
@@ -174,6 +198,8 @@ struct Dropout {
     tsc_t t0 = get_tsc();
     switch (opt.algo) {
       /* add case for your implementations here */
+    case algo_cpu_omp:
+      forward_cpu_omp(x, training); break;
     case algo_cpu_base:
       forward_cpu_base(x, training); break;
     case algo_cuda_base:
@@ -210,6 +236,26 @@ struct Dropout {
     gx.set_n0(n0);
     rg.seed(state_forward);
     real scale = 1.0 / (1 - drop_ratio);
+    for (idx_t i0 = 0; i0 < n0; i0++) {
+      for (idx_t i1 = 0; i1 < N1; i1++) {
+        for (idx_t i2 = 0; i2 < N2; i2++) {
+          for (idx_t i3 = 0; i3 < N3; i3++) {
+            if (rg.rand01() < drop_ratio) {
+              gx(i0,i1,i2,i3) = 0.0;
+            } else {
+              gx(i0,i1,i2,i3) = scale * gy(i0,i1,i2,i3);
+            }
+          }
+        }
+      }
+    }
+  }
+  void backward_cpu_omp(tensor<real,N0,N1,N2,N3>& gy) {
+    const idx_t n0 = gy.n0;
+    gx.set_n0(n0);
+    rg.seed(state_forward);
+    real scale = 1.0 / (1 - drop_ratio);
+    #pragma omp parallel for collapse(4)
     for (idx_t i0 = 0; i0 < n0; i0++) {
       for (idx_t i1 = 0; i1 < N1; i1++) {
         for (idx_t i2 = 0; i2 < N2; i2++) {
@@ -285,6 +331,8 @@ struct Dropout {
     tsc_t t0 = get_tsc();
     switch (opt.algo) {
       /* add case for your implementations here */
+    case algo_cpu_omp:
+      backward_cpu_omp(gy); break;
     case algo_cpu_base:
       backward_cpu_base(gy); break;
     case algo_cuda_base:
