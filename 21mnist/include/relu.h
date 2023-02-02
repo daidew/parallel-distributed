@@ -100,6 +100,22 @@ struct Relu {
       }
     }
   }
+  void forward_cpu_omp(tensor<real,N0,N1,N2,N3>& x, int training) {
+    (void)training;
+    const idx_t n0 = x.n0;
+    y.set_n0(n0);
+    x_ptr = &x;
+    #pragma omp parallel for collapse(4)
+    for (idx_t i0 = 0; i0 < n0; i0++) {
+      for (idx_t i1 = 0; i1 < N1; i1++) {
+        for (idx_t i2 = 0; i2 < N2; i2++) {
+          for (idx_t i3 = 0; i3 < N3; i3++) {
+            y(i0,i1,i2,i3) = max_r(0, x(i0,i1,i2,i3));
+          }
+        }
+      }
+    }
+  }
   /**
      @brief the device function of forward called from the 
      global (non-member) function
@@ -161,6 +177,8 @@ struct Relu {
     tsc_t t0 = get_tsc();
     switch (opt.algo) {
       /* add case for your implementations here */
+    case algo_cpu_omp:
+      forward_cpu_omp(x, training); break;
     case algo_cpu_base:
       forward_cpu_base(x, training); break;
     case algo_cuda_base:
@@ -196,6 +214,21 @@ struct Relu {
     const idx_t n0 = gy.n0;
     gx.set_n0(n0);
     tensor<real,N0,N1,N2,N3>& x = *x_ptr;
+    for (idx_t i0 = 0; i0 < n0; i0++) {
+      for (idx_t i1 = 0; i1 < N1; i1++) {
+        for (idx_t i2 = 0; i2 < N2; i2++) {
+          for (idx_t i3 = 0; i3 < N3; i3++) {
+            gx(i0,i1,i2,i3) = (x(i0,i1,i2,i3) >= 0 ? gy(i0,i1,i2,i3) : 0);
+          }
+        }
+      }
+    }
+  }
+  void backward_cpu_omp(tensor<real,N0,N1,N2,N3>& gy) {
+    const idx_t n0 = gy.n0;
+    gx.set_n0(n0);
+    tensor<real,N0,N1,N2,N3>& x = *x_ptr;
+    #pragma omp parallel for collapse(4)
     for (idx_t i0 = 0; i0 < n0; i0++) {
       for (idx_t i1 = 0; i1 < N1; i1++) {
         for (idx_t i2 = 0; i2 < N2; i2++) {
@@ -267,6 +300,8 @@ struct Relu {
     tsc_t t0 = get_tsc();
     switch (opt.algo) {
       /* add case for your implementations here */
+    case algo_cpu_omp:
+      backward_cpu_omp(gy); break;
     case algo_cpu_base:
       backward_cpu_base(gy); break;
     case algo_cuda_base:

@@ -238,16 +238,14 @@ struct Convolution2D {
             real v = 0.0;
             for (idx_t ic = 0; ic < IC; ic++) { // input channel
               for (idx_t di = 0; di < K; di+=2) {
-                for (idx_t dj = 0; dj < K; dj+=4) {
+                for (idx_t dj = 0; dj < K; dj+=3) {
                   // v += w(oc,ic,di,dj) * x(s,ic,i+di,j+dj);
                   v += w(oc,ic,di,dj) * x(s,ic,i+di,j+dj) 
                       +w(oc,ic,di,dj+1) * x(s,ic,i+di,j+dj+1) 
                       +w(oc,ic,di,dj+2) * x(s,ic,i+di,j+dj+2) 
-                      +w(oc,ic,di,dj+3) * x(s,ic,i+di,j+dj+3) 
                       +w(oc,ic,di+1,dj) * x(s,ic,i+di+1,j+dj) 
                       +w(oc,ic,di+1,dj+1) * x(s,ic,i+di+1,j+dj+1) 
-                      +w(oc,ic,di+1,dj+2) * x(s,ic,i+di+1,j+dj+2) 
-                      +w(oc,ic,di+1,dj+3) * x(s,ic,i+di+1,j+dj+3) ;
+                      +w(oc,ic,di+1,dj+2) * x(s,ic,i+di+1,j+dj+2); 
                 }
               }
             }
@@ -294,40 +292,56 @@ struct Convolution2D {
         for (idx_t i = 0; i < H - K + 1; i++) {   // for each output pixel
           for (idx_t j = 0; j < W - K + 1; j+=3) { // for each output pixel
             // calculate a single output pixel
-            real v0 = 0.0, v1=0.0, v2=0.0;
-            #pragma omp simd
+            // real v0 = 0.0, v1=0.0, v2=0.0;
+            // #pragma omp simd
+            // for (idx_t ic = 0; ic < IC; ic++) { // input channel
+            //   v0 +=  w(oc,ic,0,0) * x(s,ic,i,j)
+            //         +w(oc,ic,0,1) * x(s,ic,i,j+1)
+            //         +w(oc,ic,0,2) * x(s,ic,i,j+2)
+            //         +w(oc,ic,1,0) * x(s,ic,i+1,j)
+            //         +w(oc,ic,1,1) * x(s,ic,i+1,j+1)
+            //         +w(oc,ic,1,2) * x(s,ic,i+1,j+2)
+            //         +w(oc,ic,2,0) * x(s,ic,i+2,j)
+            //         +w(oc,ic,2,1) * x(s,ic,i+2,j+1)
+            //         +w(oc,ic,2,2) * x(s,ic,i+2,j+2);
+            //   v1 +=  w(oc,ic,0,0) * x(s,ic,i,j+1)
+            //         +w(oc,ic,0,1) * x(s,ic,i,j+2)
+            //         +w(oc,ic,0,2) * x(s,ic,i,j+3)
+            //         +w(oc,ic,1,0) * x(s,ic,i+1,j+1)
+            //         +w(oc,ic,1,1) * x(s,ic,i+1,j+2)
+            //         +w(oc,ic,1,2) * x(s,ic,i+1,j+3)
+            //         +w(oc,ic,2,0) * x(s,ic,i+2,j+1)
+            //         +w(oc,ic,2,1) * x(s,ic,i+2,j+2)
+            //         +w(oc,ic,2,2) * x(s,ic,i+2,j+3);
+            //   v2 +=  w(oc,ic,0,0) * x(s,ic,i,j+2)
+            //         +w(oc,ic,0,1) * x(s,ic,i,j+3)
+            //         +w(oc,ic,0,2) * x(s,ic,i,j+4)
+            //         +w(oc,ic,1,0) * x(s,ic,i+1,j+2)
+            //         +w(oc,ic,1,1) * x(s,ic,i+1,j+3)
+            //         +w(oc,ic,1,2) * x(s,ic,i+1,j+4)
+            //         +w(oc,ic,2,0) * x(s,ic,i+2,j+2)
+            //         +w(oc,ic,2,1) * x(s,ic,i+2,j+3)
+            //         +w(oc,ic,2,2) * x(s,ic,i+2,j+4);
+            // }
+            // y(s,oc,i,j) = v0 + b(oc);
+            // y(s,oc,i,j+1) = v1 + b(oc);
+            // y(s,oc,i,j+2) = v2 + b(oc);
+            real v = 0.0;
+            #pragma omp simd reduction(+: v)
             for (idx_t ic = 0; ic < IC; ic++) { // input channel
-              v0 +=  w(oc,ic,0,0) * x(s,ic,i,j)
-                    +w(oc,ic,0,1) * x(s,ic,i,j+1)
-                    +w(oc,ic,0,2) * x(s,ic,i,j+2)
-                    +w(oc,ic,1,0) * x(s,ic,i+1,j)
-                    +w(oc,ic,1,1) * x(s,ic,i+1,j+1)
-                    +w(oc,ic,1,2) * x(s,ic,i+1,j+2)
-                    +w(oc,ic,2,0) * x(s,ic,i+2,j)
-                    +w(oc,ic,2,1) * x(s,ic,i+2,j+1)
-                    +w(oc,ic,2,2) * x(s,ic,i+2,j+2);
-              v1 +=  w(oc,ic,0,0) * x(s,ic,i,j+1)
-                    +w(oc,ic,0,1) * x(s,ic,i,j+2)
-                    +w(oc,ic,0,2) * x(s,ic,i,j+3)
-                    +w(oc,ic,1,0) * x(s,ic,i+1,j+1)
-                    +w(oc,ic,1,1) * x(s,ic,i+1,j+2)
-                    +w(oc,ic,1,2) * x(s,ic,i+1,j+3)
-                    +w(oc,ic,2,0) * x(s,ic,i+2,j+1)
-                    +w(oc,ic,2,1) * x(s,ic,i+2,j+2)
-                    +w(oc,ic,2,2) * x(s,ic,i+2,j+3);
-              v2 +=  w(oc,ic,0,0) * x(s,ic,i,j+2)
-                    +w(oc,ic,0,1) * x(s,ic,i,j+3)
-                    +w(oc,ic,0,2) * x(s,ic,i,j+4)
-                    +w(oc,ic,1,0) * x(s,ic,i+1,j+2)
-                    +w(oc,ic,1,1) * x(s,ic,i+1,j+3)
-                    +w(oc,ic,1,2) * x(s,ic,i+1,j+4)
-                    +w(oc,ic,2,0) * x(s,ic,i+2,j+2)
-                    +w(oc,ic,2,1) * x(s,ic,i+2,j+3)
-                    +w(oc,ic,2,2) * x(s,ic,i+2,j+4);
+              for (idx_t di = 0; di < K; di+=2) {
+                for (idx_t dj = 0; dj < K; dj+=3) {
+                  // v += w(oc,ic,di,dj) * x(s,ic,i+di,j+dj);
+                  v += w(oc,ic,di,dj) * x(s,ic,i+di,j+dj) 
+                      +w(oc,ic,di,dj+1) * x(s,ic,i+di,j+dj+1) 
+                      +w(oc,ic,di,dj+2) * x(s,ic,i+di,j+dj+2) 
+                      +w(oc,ic,di+1,dj) * x(s,ic,i+di+1,j+dj) 
+                      +w(oc,ic,di+1,dj+1) * x(s,ic,i+di+1,j+dj+1) 
+                      +w(oc,ic,di+1,dj+2) * x(s,ic,i+di+1,j+dj+2); 
+                }
+              }
             }
-            y(s,oc,i,j) = v0 + b(oc);
-            y(s,oc,i,j+1) = v1 + b(oc);
-            y(s,oc,i,j+2) = v2 + b(oc);
+            y(s,oc,i,j) = v + b(oc);
           }
         }
       }
@@ -633,114 +647,189 @@ struct Convolution2D {
     gx.set_n0(B);
     tensor<real,maxB,IC,H,W>& x = *x_ptr;
     
+    // #pragma omp parallel for collapse(4)
+    // for (idx_t oc = 0; oc < OC; oc++) {   // output channel
+    //   for (idx_t ic = 0; ic < IC; ic++) { // input channel
+    //     for (idx_t di = 0; di < K; di++){
+    //       for (idx_t dj = 0; dj < K; dj++){
+    //         gw(oc,ic,di,dj) = 0.0;
+    //       }
+    //     }
+    //   }
+    // }
+    // real s00=0.0,s01=0.0,s02=0.0,s10=0.0,s11=0.0,s12=0.0,s20=0.0,s21=0.0,s22=0.0;
+    // #pragma omp parallel for collapse(5) private(s00,s01,s02,s10,s11,s12,s20,s21,s22)
+    // for (idx_t oc = 0; oc < OC; oc++) {   // output channel
+    //   for (idx_t ic = 0; ic < IC; ic++) { // input channel
+    //     for (idx_t s = 0; s < B; s++) { // training samples
+    //       for (idx_t i = 0; i < H - K + 1; i++) { // sample pixel
+    //         for (idx_t j = 0; j < W - K + 1; j+=4) { // sample pixel
+    //           s00 = gy(s,oc,i,j) * x(s,ic,i,j)     +gy(s,oc,i,j+1) * x(s,ic,i,j+1)   +gy(s,oc,i,j+2) * x(s,ic,i,j+2)   +gy(s,oc,i,j+3) * x(s,ic,i,j+3);
+    //           s01 = gy(s,oc,i,j) * x(s,ic,i,j+1)   +gy(s,oc,i,j+1) * x(s,ic,i,j+2)   +gy(s,oc,i,j+2) * x(s,ic,i,j+3)   +gy(s,oc,i,j+3) * x(s,ic,i,j+4);
+    //           s02 = gy(s,oc,i,j) * x(s,ic,i,j+2)   +gy(s,oc,i,j+1) * x(s,ic,i,j+3)   +gy(s,oc,i,j+2) * x(s,ic,i,j+4)   +gy(s,oc,i,j+3) * x(s,ic,i,j+5);
+    //           s10 = gy(s,oc,i,j) * x(s,ic,i+1,j)   +gy(s,oc,i,j+1) * x(s,ic,i+1,j+1) +gy(s,oc,i,j+2) * x(s,ic,i+1,j+2) +gy(s,oc,i,j+3) * x(s,ic,i+1,j+3);
+    //           s11 = gy(s,oc,i,j) * x(s,ic,i+1,j+1) +gy(s,oc,i,j+1) * x(s,ic,i+1,j+2) +gy(s,oc,i,j+2) * x(s,ic,i+1,j+3) +gy(s,oc,i,j+3) * x(s,ic,i+1,j+4);
+    //           s12 = gy(s,oc,i,j) * x(s,ic,i+1,j+2) +gy(s,oc,i,j+1) * x(s,ic,i+1,j+3) +gy(s,oc,i,j+2) * x(s,ic,i+1,j+4) +gy(s,oc,i,j+3) * x(s,ic,i+1,j+5);
+    //           s20 = gy(s,oc,i,j) * x(s,ic,i+2,j)   +gy(s,oc,i,j+1) * x(s,ic,i+2,j+1) +gy(s,oc,i,j+2) * x(s,ic,i+2,j+2) +gy(s,oc,i,j+3) * x(s,ic,i+2,j+3);
+    //           s21 = gy(s,oc,i,j) * x(s,ic,i+2,j+1) +gy(s,oc,i,j+1) * x(s,ic,i+2,j+2) +gy(s,oc,i,j+2) * x(s,ic,i+2,j+3) +gy(s,oc,i,j+3) * x(s,ic,i+2,j+4);
+    //           s22 = gy(s,oc,i,j) * x(s,ic,i+2,j+2) +gy(s,oc,i,j+1) * x(s,ic,i+2,j+3) +gy(s,oc,i,j+2) * x(s,ic,i+2,j+4) +gy(s,oc,i,j+3) * x(s,ic,i+2,j+5);
+
+    //           #pragma omp atomic
+    //             gw(oc,ic,0,0) += s00;
+    //           #pragma omp atomic
+    //             gw(oc,ic,0,1) += s01;
+    //           #pragma omp atomic
+    //             gw(oc,ic,0,2) += s02;
+    //           #pragma omp atomic
+    //             gw(oc,ic,1,0) += s10;
+    //           #pragma omp atomic
+    //             gw(oc,ic,1,1) += s11;
+    //           #pragma omp atomic
+    //             gw(oc,ic,1,2) += s12;
+    //           #pragma omp atomic
+    //             gw(oc,ic,2,0) += s20;
+    //           #pragma omp atomic
+    //             gw(oc,ic,2,1) += s21;
+    //           #pragma omp atomic
+    //             gw(oc,ic,2,2) += s22;
+              
+    //         }
+    //       }
+    //     }
+    //   }
+    // }
+
+
+    // #pragma omp parallel for
+    // for (idx_t oc = 0; oc < OC; oc++) {
+    //   gy(oc) = 0.0;
+    // }
+    // real v = 0.0;
+    // #pragma omp parallel for collapse(4) private(v)
+    // for (idx_t oc = 0; oc < OC; oc++) {
+    //   for (idx_t s = 0; s < B; s++) {
+    //     for (idx_t i = 0; i < H - K + 1; i+=2) {
+    //       for (idx_t j = 0; j < W - K + 1; j+=4) {
+    //         v =  gy(s,oc,i,j) 
+    //             +gy(s,oc,i,j+1) 
+    //             +gy(s,oc,i,j+2) 
+    //             +gy(s,oc,i,j+3) 
+    //             +gy(s,oc,i+1,j) 
+    //             +gy(s,oc,i+1,j+1)
+    //             +gy(s,oc,i+1,j+2)
+    //             +gy(s,oc,i+1,j+3)
+    //             ;
+    //         // #pragma omp atomic
+    //         gy(oc) += v;
+    //       }
+    //     }
+    //   }
+    // }
+    // #pragma omp parallel for collapse(4)
+    // for (idx_t s = 0; s < B; s++) {
+    //   for (idx_t ic = 0; ic < IC; ic++) {
+    //     for (idx_t i = 0; i < H; i++) {
+    //       for (idx_t j = 0; j < W; j++) {
+    //         gx(s,ic,i,j) = 0.0;
+    //       }
+    //     }
+    //   }
+    // }
+    // #pragma omp parallel for collapse(5)
+    // for (idx_t s = 0; s < B; s++) {
+    //   for (idx_t ic = 0; ic < IC; ic++) {
+    //     for (idx_t i = 2; i < H; i+=3) {
+    //       for (idx_t j = 2; j < W; j+=3) {
+    //         for (idx_t oc = 0; oc < OC; oc++) {
+    //           real v = gy(s,oc,i,j) * w(oc,ic,0,0)
+    //               +gy(s,oc,i,j-1)   * w(oc,ic,0,1)
+    //               +gy(s,oc,i,j-2)   * w(oc,ic,0,2)
+    //               +gy(s,oc,i-1,j)   * w(oc,ic,1,0)
+    //               +gy(s,oc,i-1,j-1) * w(oc,ic,1,1)
+    //               +gy(s,oc,i-1,j-2) * w(oc,ic,1,2)
+    //               +gy(s,oc,i-2,j)   * w(oc,ic,2,0)
+    //               +gy(s,oc,i-2,j-1) * w(oc,ic,2,1)
+    //               +gy(s,oc,i-2,j-2) * w(oc,ic,2,2)
+    //               ;
+    //           #pragma omp atomic
+    //           gx(s,ic,i,j) += v;
+    //         }
+            
+    //       }
+    //     }
+    //   }
+    // }
     #pragma omp parallel for collapse(4)
     for (idx_t oc = 0; oc < OC; oc++) {   // output channel
       for (idx_t ic = 0; ic < IC; ic++) { // input channel
-        for (idx_t di = 0; di < K; di++){
-          for (idx_t dj = 0; dj < K; dj++){
-            gw(oc,ic,di,dj) = 0.0;
-          }
-        }
-      }
-    }
-    real s00=0.0,s01=0.0,s02=0.0,s10=0.0,s11=0.0,s12=0.0,s20=0.0,s21=0.0,s22=0.0;
-    #pragma omp parallel for collapse(5) private(s00,s01,s02,s10,s11,s12,s20,s21,s22)
-    for (idx_t oc = 0; oc < OC; oc++) {   // output channel
-      for (idx_t ic = 0; ic < IC; ic++) { // input channel
-        for (idx_t s = 0; s < B; s++) { // training samples
-          for (idx_t i = 0; i < H - K + 1; i++) { // sample pixel
-            for (idx_t j = 0; j < W - K + 1; j+=4) { // sample pixel
-              s00 = gy(s,oc,i,j) * x(s,ic,i,j)     +gy(s,oc,i,j+1) * x(s,ic,i,j+1)   +gy(s,oc,i,j+2) * x(s,ic,i,j+2)   +gy(s,oc,i,j+3) * x(s,ic,i,j+3);
-              s01 = gy(s,oc,i,j) * x(s,ic,i,j+1)   +gy(s,oc,i,j+1) * x(s,ic,i,j+2)   +gy(s,oc,i,j+2) * x(s,ic,i,j+3)   +gy(s,oc,i,j+3) * x(s,ic,i,j+4);
-              s02 = gy(s,oc,i,j) * x(s,ic,i,j+2)   +gy(s,oc,i,j+1) * x(s,ic,i,j+3)   +gy(s,oc,i,j+2) * x(s,ic,i,j+4)   +gy(s,oc,i,j+3) * x(s,ic,i,j+5);
-              s10 = gy(s,oc,i,j) * x(s,ic,i+1,j)   +gy(s,oc,i,j+1) * x(s,ic,i+1,j+1) +gy(s,oc,i,j+2) * x(s,ic,i+1,j+2) +gy(s,oc,i,j+3) * x(s,ic,i+1,j+3);
-              s11 = gy(s,oc,i,j) * x(s,ic,i+1,j+1) +gy(s,oc,i,j+1) * x(s,ic,i+1,j+2) +gy(s,oc,i,j+2) * x(s,ic,i+1,j+3) +gy(s,oc,i,j+3) * x(s,ic,i+1,j+4);
-              s12 = gy(s,oc,i,j) * x(s,ic,i+1,j+2) +gy(s,oc,i,j+1) * x(s,ic,i+1,j+3) +gy(s,oc,i,j+2) * x(s,ic,i+1,j+4) +gy(s,oc,i,j+3) * x(s,ic,i+1,j+5);
-              s20 = gy(s,oc,i,j) * x(s,ic,i+2,j)   +gy(s,oc,i,j+1) * x(s,ic,i+2,j+1) +gy(s,oc,i,j+2) * x(s,ic,i+2,j+2) +gy(s,oc,i,j+3) * x(s,ic,i+2,j+3);
-              s21 = gy(s,oc,i,j) * x(s,ic,i+2,j+1) +gy(s,oc,i,j+1) * x(s,ic,i+2,j+2) +gy(s,oc,i,j+2) * x(s,ic,i+2,j+3) +gy(s,oc,i,j+3) * x(s,ic,i+2,j+4);
-              s22 = gy(s,oc,i,j) * x(s,ic,i+2,j+2) +gy(s,oc,i,j+1) * x(s,ic,i+2,j+3) +gy(s,oc,i,j+2) * x(s,ic,i+2,j+4) +gy(s,oc,i,j+3) * x(s,ic,i+2,j+5);
-
-              #pragma omp atomic
-                gw(oc,ic,0,0) += s00;
-              #pragma omp atomic
-                gw(oc,ic,0,1) += s01;
-              #pragma omp atomic
-                gw(oc,ic,0,2) += s02;
-              #pragma omp atomic
-                gw(oc,ic,1,0) += s10;
-              #pragma omp atomic
-                gw(oc,ic,1,1) += s11;
-              #pragma omp atomic
-                gw(oc,ic,1,2) += s12;
-              #pragma omp atomic
-                gw(oc,ic,2,0) += s20;
-              #pragma omp atomic
-                gw(oc,ic,2,1) += s21;
-              #pragma omp atomic
-                gw(oc,ic,2,2) += s22;
-              
+        for (idx_t di = 0; di < K; di++) { // kernel pixel
+          for (idx_t dj = 0; dj < K; dj++) { // kernel pixel
+            // real v = 0.0;
+            // for (idx_t s = 0; s < B; s++) { // training samples
+            //   for (idx_t i = 0; i < H - K + 1; i++) { // sample pixel
+            //     for (idx_t j = 0; j < W - K + 1; j++) { // sample pixel
+            //       v += gy(s,oc,i,j) * x(s,ic,i+di,j+dj);
+            //     }
+            //   }
+            // }
+            real v = 0.0;
+            #pragma omp simd reduction(+: v)
+            for (idx_t s = 0; s < B; s++) { // training samples
+              for (idx_t i = 0; i < H - K + 1; i+=2) { // sample pixel
+                for (idx_t j = 0; j < W - K + 1; j+=4) { // sample pixel
+                  // v += gy(s,oc,i,j) * x(s,ic,i+di,j+dj);
+                  v += gy(s,oc,i,j) * x(s,ic,i+di,j+dj)
+                      +gy(s,oc,i,j+1) * x(s,ic,i+di,j+1+dj)
+                      +gy(s,oc,i,j+2) * x(s,ic,i+di,j+2+dj)
+                      +gy(s,oc,i,j+3) * x(s,ic,i+di,j+3+dj)
+                      +gy(s,oc,i+1,j) * x(s,ic,i+1+di,j+dj)
+                      +gy(s,oc,i+1,j+1) * x(s,ic,i+1+di,j+1+dj)
+                      +gy(s,oc,i+1,j+2) * x(s,ic,i+1+di,j+2+dj)
+                      +gy(s,oc,i+1,j+3) * x(s,ic,i+1+di,j+3+dj);
+                }
+              }
             }
+            gw(oc,ic,di,dj) = v;
+
           }
         }
       }
     }
-
-
     #pragma omp parallel for
     for (idx_t oc = 0; oc < OC; oc++) {
-      gy(oc) = 0.0;
-    }
-    real v = 0.0;
-    #pragma omp parallel for collapse(4) private(v)
-    for (idx_t oc = 0; oc < OC; oc++) {
+      real v = 0.0;
+      
       for (idx_t s = 0; s < B; s++) {
         for (idx_t i = 0; i < H - K + 1; i+=2) {
-          for (idx_t j = 0; j < W - K + 1; j+=4) {
-            v =  gy(s,oc,i,j) 
-                +gy(s,oc,i,j+1) 
-                +gy(s,oc,i,j+2) 
-                +gy(s,oc,i,j+3) 
-                +gy(s,oc,i+1,j) 
-                +gy(s,oc,i+1,j+1)
-                +gy(s,oc,i+1,j+2)
-                +gy(s,oc,i+1,j+3)
-                ;
-            // #pragma omp atomic
-            gy(oc) += v;
+          for (idx_t j = 0; j < W - K + 1; j+=2) {
+            // v += gy(s,oc,i,j);
+            v += gy(s,oc,i,j) + gy(s,oc,i,j+1) + gy(s,oc,i+1,j) + gy(s,oc,i+1,j+1);
           }
         }
       }
+      gb(oc) = v;
     }
     #pragma omp parallel for collapse(4)
     for (idx_t s = 0; s < B; s++) {
       for (idx_t ic = 0; ic < IC; ic++) {
         for (idx_t i = 0; i < H; i++) {
           for (idx_t j = 0; j < W; j++) {
-            gx(s,ic,i,j) = 0.0;
-          }
-        }
-      }
-    }
-    #pragma omp parallel for collapse(5)
-    for (idx_t s = 0; s < B; s++) {
-      for (idx_t ic = 0; ic < IC; ic++) {
-        for (idx_t i = 2; i < H; i+=3) {
-          for (idx_t j = 2; j < W; j+=3) {
+            real v = 0.0;
+            #pragma omp simd reduction(+: v)
             for (idx_t oc = 0; oc < OC; oc++) {
-              real v = gy(s,oc,i,j) * w(oc,ic,0,0)
-                  +gy(s,oc,i,j-1)   * w(oc,ic,0,1)
-                  +gy(s,oc,i,j-2)   * w(oc,ic,0,2)
-                  +gy(s,oc,i-1,j)   * w(oc,ic,1,0)
-                  +gy(s,oc,i-1,j-1) * w(oc,ic,1,1)
-                  +gy(s,oc,i-1,j-2) * w(oc,ic,1,2)
-                  +gy(s,oc,i-2,j)   * w(oc,ic,2,0)
-                  +gy(s,oc,i-2,j-1) * w(oc,ic,2,1)
-                  +gy(s,oc,i-2,j-2) * w(oc,ic,2,2)
-                  ;
-              #pragma omp atomic
-              gx(s,ic,i,j) += v;
+              for (idx_t di = 0; di < K; di++) {
+                for (idx_t dj = 0; dj < K; dj+=3) {
+                  if (0 <= i - di && i - di < H - K + 1
+                      && 0 <= j - dj && j - dj < W - K + 1) {
+                    // v += gy(s,oc,i-di,j-dj) * w(oc,ic,di,dj);
+                    v += gy(s,oc,i-di,j-dj) * w(oc,ic,di,dj)
+                        +gy(s,oc,i-di,j-dj+1) * w(oc,ic,di,dj+1)
+                        +gy(s,oc,i-di,j-dj+2) * w(oc,ic,di,dj+2);
+                  }
+                }
+              }
             }
-            
+            gx(s,ic,i,j) = v;
           }
         }
       }
