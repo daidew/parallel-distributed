@@ -202,6 +202,18 @@ __global__ void forward_cuda_base_global(T* dev, I0* x_dev, I1* t_dev, int train
   dev->forward_cuda_base_device(*x_dev, *t_dev, training);
 }
 
+template<typename T, typename I>
+__global__ void forward_cuda_fast_global(T* dev, I* x_dev, int training) {
+  /* call the member function */
+  dev->forward_cuda_fast_device(*x_dev, training);
+}
+
+template<typename T, typename I0, typename I1>
+__global__ void forward_cuda_fast_global(T* dev, I0* x_dev, I1* t_dev, int training) {
+  /* call the member function */
+  dev->forward_cuda_fast_device(*x_dev, *t_dev, training);
+}
+
 /**
    @brief a global CUDA function that implements the baseline 
    backward function for GPU
@@ -218,6 +230,32 @@ __global__ void backward_cuda_base_global(T* dev, O* gy_dev) {
 template<typename T, typename O, typename I1>
 __global__ void backward_cuda_base_global(T* dev, O* gy_dev, I1* t_dev) {
   dev->backward_cuda_base_device(*gy_dev, *t_dev);
+}
+
+template<typename T, typename O>
+__global__ void __L1__backward_cuda_fast_global(T* dev, O* gy_dev) {
+  dev->__L1__backward_cuda_fast_device(*gy_dev);
+}
+template<typename T, typename O>
+__global__ void __L2__backward_cuda_fast_global(T* dev, O* gy_dev) {
+  dev->__L2__backward_cuda_fast_device(*gy_dev);
+}
+template<typename T, typename O>
+__global__ void __L3__backward_cuda_fast_global(T* dev, O* gy_dev) {
+  dev->__L3__backward_cuda_fast_device(*gy_dev);
+}
+
+template<typename T, typename O, typename I1>
+__global__ void __L1__backward_cuda_fast_global(T* dev, O* gy_dev, I1* t_dev) {
+  dev->__L1__backward_cuda_fast_device(*gy_dev, *t_dev);
+}
+template<typename T, typename O, typename I1>
+__global__ void __L2__backward_cuda_fast_global(T* dev, O* gy_dev, I1* t_dev) {
+  dev->__L2__backward_cuda_fast_device(*gy_dev, *t_dev);
+}
+template<typename T, typename O, typename I1>
+__global__ void __L3__backward_cuda_fast_global(T* dev, O* gy_dev, I1* t_dev) {
+  dev->__L3__backward_cuda_fast_device(*gy_dev, *t_dev);
 }
 
 /**

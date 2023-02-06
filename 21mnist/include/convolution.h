@@ -37,6 +37,9 @@ template<idx_t maxB,idx_t IC,idx_t H,idx_t W,idx_t K,idx_t OC>
 struct Convolution2D {
 #if __CUDACC__
   Convolution2D<maxB,IC,H,W,K,OC> * dev; /**< device shadow */
+  int T_b = 1024, W_b = 32, N_b_fw = 2304;
+  int N_b_bw_L1=1024, N_b_bw_L2=1, N_b_bw_L3=3000;
+  
 #endif
   cmdline_opt opt;                 /**< command line option  */
   logger * lgr;                    /**< logger */
@@ -223,6 +226,45 @@ struct Convolution2D {
       }
     }
   }
+  void forward_cuda_fast(tensor<real,maxB,IC,H,W>& x, int training) {
+#if __CUDACC__
+    launch_and_sync((forward_cuda_fast_global<<<N_b_fw,T_b>>>(dev, x.dev, training)));
+#else
+    (void)x;
+    (void)training;
+    err_cuda_code_non_cuda_compiler(opt.algo_s);
+#endif
+}
+  __device__  
+  void forward_cuda_fast_device(tensor<real,maxB,IC,H,W>& x, int training) {
+    (void)training;
+    idx_t B = x.n0;             // batch size
+    y.set_n0(B);
+    x_ptr = &x;                 // save pointer to input for backward
+
+    int n = blockDim.x * blockIdx.x + threadIdx.x, s, oc, i, j;
+    int H2 = H-K+1, W2 = W-K+1;
+    s=(((n/W2)/H2)/OC)%B;
+    oc=((n/W2)/H2)%OC;
+    i=(n/W2)%H2;
+    j=n%W2;
+    // printf("hello I am CUDA thread %d out of %d: (s,oc,i,j)=(%d,%d,%d,%d), (B,OC,H2,W2)=(%d,%d,%d,%d)\n", n, blockDim.x*gridDim.x, s,oc,i,j, B,OC,H2,W2);
+
+    if (n < B*OC*H2*W2) {
+      // calculate a single output pixel
+      real v = 0.0;
+      for (idx_t ic = 0; ic < IC; ic++) { // input channel
+        for (idx_t di = 0; di < K; di++) {
+          for (idx_t dj = 0; dj < K; dj++) {
+            v += w(oc,ic,di,dj) * x(s,ic,i+di,j+dj);
+          }
+        }
+      }
+      y(s,oc,i,j) = v + b(oc);
+    }        
+  }
+
+  
   void forward_cpu_omp(tensor<real,maxB,IC,H,W>& x, int training) {
     (void)training;
     idx_t B = x.n0;             // batch size
@@ -258,8 +300,7 @@ struct Convolution2D {
   void forward_cpu_simd(tensor<real,maxB,IC,H,W>& x, int training) {
     (void)training;
     idx_t B = x.n0;             // batch size
-    y.set_n0(B);
-    x_ptr = &x;                 // save pointer to input for backward
+                     // save pointer to input for backward
     for (idx_t s = 0; s < B; s++) {       // for each sample
       for (idx_t oc = 0; oc < OC; oc++) { // for each output channel
         for (idx_t i = 0; i < H - K + 1; i++) {   // for each output pixel
@@ -419,6 +460,8 @@ struct Convolution2D {
       forward_cpu_base(x, training); break;
     case algo_cuda_base:
       forward_cuda_base(x, training); break;
+    case algo_cuda_fast:
+      forward_cuda_fast(x, training); break;
     default:
       if (opt.cuda_algo) {
         forward_cuda_base(x, training);
@@ -499,6 +542,90 @@ struct Convolution2D {
           }
         }
       }
+    }
+  }
+
+  void backward_cuda_fast(tensor<real,maxB,OC,H-K+1,W-K+1>& gy) {
+#if __CUDACC__
+    idx_t B = gy.n0;
+    printf("%d %d %d\n", gy.n0, gy.n0, gy.n0);
+    gw.set_n0(OC);
+    gb.set_n0(OC);
+    gx.set_n0(B);
+    tensor<real,maxB,IC,H,W>& x = *x_ptr;
+    launch_and_sync((__L1__backward_cuda_fast_global<<<N_b_bw_L1,T_b>>>(dev, gy.dev)));
+    launch_and_sync((__L2__backward_cuda_fast_global<<<N_b_bw_L2,T_b>>>(dev, gy.dev)));
+    launch_and_sync((__L3__backward_cuda_fast_global<<<N_b_bw_L3,T_b>>>(dev, gy.dev)));
+
+#else
+    (void)x;
+    (void)training;
+    err_cuda_code_non_cuda_compiler(opt.algo_s);
+#endif
+  }
+  __device__  
+  void __L1__backward_cuda_fast_device(tensor<real,maxB,OC,H-K+1,W-K+1>& gy) {
+    int n = blockDim.x * blockIdx.x + threadIdx.x, oc, ic, di, dj;
+    idx_t B = gy.n0;
+    tensor<real,maxB,IC,H,W>& x = *x_ptr;
+    oc=(((n/K)/K)/OC)%B;
+    ic=((n/K)/K)%OC;
+    di=(n/K)%K;
+    dj=n%K;
+    
+    if(n < OC*IC*K*K){
+      real v = 0.0;
+      for (idx_t s = 0; s < B; s++) { // training samples
+        for (idx_t i = 0; i < H - K + 1; i++) { // sample pixel
+          for (idx_t j = 0; j < W - K + 1; j++) { // sample pixel
+            v += gy(s,oc,i,j) * x(s,ic,i+di,j+dj);
+          }
+        }
+      }
+      gw(oc,ic,di,dj) = v;
+    }
+  }
+  __device__  
+  void __L2__backward_cuda_fast_device(tensor<real,maxB,OC,H-K+1,W-K+1>& gy) {
+    int n = blockDim.x * blockIdx.x + threadIdx.x, oc;
+    idx_t B = gy.n0;
+    tensor<real,maxB,IC,H,W>& x = *x_ptr;
+    oc = n % OC;
+    if(n < OC){
+      real v = 0.0;
+      for (idx_t s = 0; s < B; s++) {
+        for (idx_t i = 0; i < H - K + 1; i++) {
+          for (idx_t j = 0; j < W - K + 1; j++) {
+            v += gy(s,oc,i,j);
+          }
+        }
+      }
+      gb(oc) = v;
+    }
+  }
+  __device__  
+  void __L3__backward_cuda_fast_device(tensor<real,maxB,OC,H-K+1,W-K+1>& gy) {
+    int n = blockDim.x * blockIdx.x + threadIdx.x, s, ic, i, j;
+    idx_t B = gy.n0;
+    tensor<real,maxB,IC,H,W>& x = *x_ptr;
+    s=(((n/W)/H)/IC)%B;
+    ic=((n/W)/H)%IC;
+    i=(n/W)%H;
+    j=n%W;
+
+    if(n < B*IC*H*W){
+      real v = 0.0;
+      for (idx_t oc = 0; oc < OC; oc++) {
+        for (idx_t di = 0; di < K; di++) {
+          for (idx_t dj = 0; dj < K; dj++) {
+            if (0 <= i - di && i - di < H - K + 1
+                && 0 <= j - dj && j - dj < W - K + 1) {
+              v += gy(s,oc,i-di,j-dj) * w(oc,ic,di,dj);
+            }
+          }
+        }
+      }
+      gx(s,ic,i,j) = v;
     }
   }
   void backward_cpu_omp(tensor<real,maxB,OC,H-K+1,W-K+1>& gy) {
@@ -906,6 +1033,8 @@ struct Convolution2D {
       backward_cpu_base(gy); break;
     case algo_cuda_base:
       backward_cuda_base(gy); break;
+    case algo_cuda_fast:
+      backward_cuda_fast(gy); break;
     default:
       if (opt.cuda_algo) {
         backward_cuda_base(gy);

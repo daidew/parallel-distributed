@@ -86,6 +86,7 @@ typedef enum {
   algo_cpu_simd,
   algo_cpu_cl_vec,
   algo_cpu_omp_simd,
+  algo_cuda_fast,
   /* algo_cpu_simd? */
   /* algo_cpu_omp */
   /* algo_cpu_simd_omp? */
@@ -93,7 +94,6 @@ typedef enum {
   /* algo_cuda_fast? */
   /* algo_cpu_super_fast? */
   /* algo_cuda_super_fast? */
-  
   algo_invalid,
 } algo_t;
 
@@ -120,11 +120,11 @@ static algo_t parse_algo(const char * s) {
   }
   else if (strcmp(s, "cuda_base") == 0) {
     return algo_cuda_base;
-    /* add cases here to handle your algorithms
-       } else if (strcmp(s, "cpu_fast") == 0) {
-       return algo_cpu_fast;
-    */
-  } else {
+  } 
+  else if (strcmp(s, "cuda_fast") == 0) {
+    return algo_cuda_fast;
+  }
+  else {
     return algo_invalid;
   }
 }
